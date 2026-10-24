@@ -1,7 +1,6 @@
-const bcrypt = require('bcryptjs')
 const jwt = require('jsonwebtoken')
 const { eq } = require('drizzle-orm')
-const { db, users } = require('../db')
+const { db, customers } = require('../db')
 
 const cookieOpts = {
   httpOnly: true,
@@ -17,18 +16,21 @@ const sign = (res, user) => {
   res.cookie('token', token, cookieOpts)
 }
 
+const findByEmail = async (email) => {
+  const [user] = await db.select().from(customers).where(eq(customers.email, email.toLowerCase()))
+  return user
+}
+
 const register = async (req, res) => {
-  const { name, email, password } = req.body ?? {}
+  const { name, email, password, phone } = req.body ?? {}
   if (!name || !email || !password || password.length < 6)
     return res.status(400).json({ message: 'Name, email and password (min 6 chars) required' })
 
-  const [existing] = await db.select().from(users).where(eq(users.email, email.toLowerCase()))
-  if (existing) return res.status(409).json({ message: 'Email already registered' })
+  if (await findByEmail(email)) return res.status(409).json({ message: 'Email already registered' })
 
-  const passwordHash = await bcrypt.hash(password, 10)
   const [user] = await db
-    .insert(users)
-    .values({ name, email: email.toLowerCase(), passwordHash })
+    .insert(customers)
+    .values({ name, email: email.toLowerCase(), password, phone })
     .returning()
   sign(res, user)
   res.status(201).json({ user: publicUser(user) })
@@ -38,8 +40,8 @@ const login = async (req, res) => {
   const { email, password } = req.body ?? {}
   if (!email || !password) return res.status(400).json({ message: 'Email and password required' })
 
-  const [user] = await db.select().from(users).where(eq(users.email, email.toLowerCase()))
-  if (!user || !(await bcrypt.compare(password, user.passwordHash)))
+  const user = await findByEmail(email)
+  if (!user || user.password !== password)
     return res.status(401).json({ message: 'Invalid credentials' })
 
   sign(res, user)
@@ -52,7 +54,7 @@ const logout = (req, res) => {
 }
 
 const me = async (req, res) => {
-  const [user] = await db.select().from(users).where(eq(users.id, req.user.id))
+  const [user] = await db.select().from(customers).where(eq(customers.id, req.user.id))
   if (!user) return res.status(401).json({ message: 'User not found' })
   res.json({ user: publicUser(user) })
 }
